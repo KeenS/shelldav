@@ -1,0 +1,209 @@
+#!/bin/sh
+
+BASE_URL=http://webdav.example/your/dir/
+
+# If authorization required
+# USER=me
+# PASSWORD=mypassword
+# USE_DIGEST=true
+
+# any curl options you want to pass to
+GLOBAL_CURL_OPTIONS='-L'
+
+# For more information, see https://github.com/KeenS/shelldav
+
+
+#################################################################################
+# Copyright (c) 2015, Sunrin SHIMURA
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+# * Redistributions of source code must retain the above copyright notice, 
+#   this list of conditions and the following disclaimer.
+# * Redistributions in binary form must reproduce the above copyright notice, 
+#   this list of conditions and the following disclaimer in the documentation 
+#   and/or other materials provided with the distribution.
+# * Neither the name of the <organization> nor the　names of its contributors 
+#   may be used to endorse or promote products derived from this software 
+#   without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL Sunrin SHIMURA BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+##################################################################################
+
+main(){
+    command="$1"
+    shift
+    case "${command}" in
+        get) dav_get "$@" ;;
+        mkdir) dav_mkdir "$@";;
+        put) dav_put "$@";;
+        rm) dav_rm "$@";;
+        mv) dav_mv "$@";;
+        cp) dav_cp "$@";;
+        help) help "$@";;
+        *) subcommand_missing "${command}" "$@"
+           exit 1
+    esac
+             
+}
+
+
+parents(){
+    dir="$1"
+    while [ "${dir}" != . ] && [ "${dir}" != "/" ]; do
+        echo "${dir}"
+        dir="$(dirname "${dir}")"
+    done
+}
+
+curl_options(){
+    if [ -n "${USER}" ] || [ -n "${PASSWORD}" ]; then
+        CURL_OPTIONS="${CURL_OPTIONS} -u ${USER}:${PASSWORD}"
+        if [ "${USE_DIGEST}" = true ]; then
+            CURL_OPTIONS="${CURL_OPTIONS} --digest"
+        fi
+    fi
+    echo "${GLOBAL_CURL_OPTIONS} ${CURL_OPTIONS}"
+    unset CURL_OPTIONS
+}
+
+
+dav(){
+    method="$1"
+    path="$2"
+    shift 2
+    curl $(curl_options) "$@" -X "$method" "${BASE_URL}/$path"
+}
+
+
+# mkdir
+dav__mkdir(){
+    dav MKCOL "$1"
+}
+
+dav__mkdir_p(){
+    parents "$1" | sort | while read dir; do
+        dav__mkdir "${dir}"
+    done
+}
+
+dav_mkdir(){
+    recursive=false
+    for arg; do
+        case "${arg}" in
+            -p) recursive=true
+                shift
+        esac
+    done
+
+    if [ "${recursive}" = true ]; then
+        dav__mkdir_p "$1"
+    else
+        dav__mkdir "$1"
+    fi
+}
+
+# get
+dav__get(){
+    dav GET "$1"
+}
+
+dav_get(){
+    dav__get "$1"
+}
+
+# put
+dav__put_f(){
+    case $# in
+        1) dav PUT "$1" --upload "$1";;
+        2) dav PUT "$2" --upload "$1";;
+        *) exit 1;;
+    esac
+}
+
+dav__put(){
+    CURL_OPTIONS="${CURL_OPTIONS} -H 'Overwrite: F'"
+    dav__put_f "$@"
+}
+
+dav_put(){
+    dav__put_f "$@"
+}
+
+# rm
+dav__rm(){
+    for arg; do
+        dav DELETE "${arg}"
+    done
+}
+
+dav_rm(){
+    dav__rm "$@"
+}
+
+# mv
+dav__mv(){
+    CURL_OPTIONS="${CURL_OPTIONS} -H 'Destination: ${BASE_URL}/$2'"
+    dav MOVE "$1"
+}
+
+dav__mv_f(){
+    CURL_OPTIONS="${CURL_OPTIONS} -H 'Overrite: T'"
+    dav__mv "$@"
+}
+
+dav_mv(){
+    dav__mv_f "$@"
+}
+
+# cp
+dav__cp(){
+    CURL_OPTIONS="${CURL_OPTIONS} -H 'Destination: ${BASE_URL}/$2'"
+    dav COPY "$1"
+}
+
+dav__cp_f(){
+    CURL_OPTIONS="${CURL_OPTIONS} -H 'Overrite: T'"
+    dav__cp "$@"
+}
+
+dav_cp(){
+    dav__cp_f "$@"
+}
+
+
+help() {
+    cat <<EOF
+NAME
+  Shelldav -- webdav cli on ${BASE_URL}
+
+SYNOPSIS
+  $0 <command> [options] <args>
+
+DESCRIPTION
+get <file>        -- get the file.
+put <file> [dest] -- put the file to dest. If dest is omitted, file path is used.
+mkdir [-p] <path> -- make directory.
+mv <file> <dest>  -- move file to dest.
+cp <file> <dest>  -- copy file to dest.
+rm <file> ...     -- remove the files.
+EOF
+}
+
+subcommand_missing(){
+    echo "no such subcommand $1" >&2
+}
+
+
+main "$@"
+ 
